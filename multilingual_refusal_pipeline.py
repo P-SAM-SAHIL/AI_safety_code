@@ -306,6 +306,7 @@ def get_last_token_hidden_states(
             return_tensors="pt",
             padding=True,
             truncation=True,
+            max_length=512,
         ).to(input_device)
 
         with torch.no_grad():
