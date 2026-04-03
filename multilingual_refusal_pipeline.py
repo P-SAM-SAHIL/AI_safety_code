@@ -212,10 +212,6 @@ def clear_memory() -> None:
 
 
 def choose_torch_dtype() -> torch.dtype:
-    if not torch.cuda.is_available():
-        return torch.float32
-    if torch.cuda.is_bf16_supported():
-        return torch.bfloat16
     return torch.float16
 
 
