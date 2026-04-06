@@ -43,6 +43,7 @@ SAFE_LANG_COLUMN_CANDIDATES = [
     "text",
     "Text",
     "Safe_Control_Prompt",
+    "label"
 ]
 
 ENGLISH_QUESTION_COLUMN_CANDIDATES = [
