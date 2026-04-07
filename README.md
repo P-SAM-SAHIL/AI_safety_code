@@ -2,7 +2,7 @@
 
 ! python run_experiment.py \
   --language amh \
-  --model-id google/gemma-3-12b-it \
+  --model-id mistralai/Mistral-7B-Instruct-v0.3 \
   --experiment-csv amh_ready_for_experiment.csv \
   --safe-lang-csv amh_safe.csv \
   --safe-eng-csv Safe_prompts_eng.csv
