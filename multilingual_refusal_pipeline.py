@@ -102,15 +102,14 @@ class ModelPreset:
 
 
 MODEL_PRESETS: Dict[str, ModelPreset] = {
-    "google/gemma-3-12b-it": ModelPreset(
-        model_id="google/gemma-3-12b-it",
-        output_name="gemma",
-        total_layers=48,
-        layer_start=24,
-        layer_end=38,
-        pca_layer=30,
-    ),
-    "Qwen/Qwen3-8B": ModelPreset(
+        "mistralai/Mistral-7B-Instruct-v0.3": ModelPreset(
+        model_id="mistralai/Mistral-7B-Instruct-v0.3",
+        output_name="mistral",
+        total_layers=32,
+        layer_start=14,
+        layer_end=24,
+        pca_layer=16,
+    ),    "Qwen/Qwen3-8B": ModelPreset(
         model_id="Qwen/Qwen3-8B",
         output_name="qwen",
         total_layers=36,
@@ -129,8 +128,8 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
 }
 
 MODEL_ALIASES = {
-    "gemma": "google/gemma-3-12b-it",
-    "gemma3": "google/gemma-3-12b-it",
+    "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
+    "mistral7b": "mistralai/Mistral-7B-Instruct-v0.3",
     "qwen": "Qwen/Qwen3-8B",
     "qwen3": "Qwen/Qwen3-8B",
     "llama": "meta-llama/Llama-3.1-8B-Instruct",
@@ -152,8 +151,8 @@ def parse_args() -> argparse.Namespace:
         "--model-id",
         required=True,
         help=(
-            "Model ID or alias. Supported presets: google/gemma-3-12b-it, Qwen/Qwen3-8B, "
-            "meta-llama/Llama-3.1-8B-Instruct, or aliases gemma/qwen/llama."
+            "Model ID or alias. Supported presets: mistralai/Mistral-7B-Instruct-v0.3, "
+            "Qwen/Qwen3-8B, meta-llama/Llama-3.1-8B-Instruct, or aliases mistral/qwen/llama."
         ),
     )
     parser.add_argument(
