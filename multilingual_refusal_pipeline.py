@@ -860,6 +860,7 @@ def save_pca_projection_plot_3d(
 
     fig = go.Figure()
 
+    # 1. Helper to draw the scatter points
     def add_trace(points: np.ndarray, label: str, color: str) -> None:
         fig.add_trace(go.Scatter3d(
             x=points[:, 0],
@@ -875,12 +876,35 @@ def save_pca_projection_plot_3d(
             )
         ))
 
+    # Add the cluster points
     add_trace(pca_safe_eng, "harmless_en", "#b0c4de")
     add_trace(pca_unsafe_eng, "harmful_refuse_en", "#f4a460")
     add_trace(pca_safe_lang, f"harmless_{language_label.lower()}", "#3cb371")
     add_trace(pca_unsafe_lang_lit, f"harmful_refuse_{language_label.lower()}_lit", "#4682b4")
     add_trace(pca_unsafe_lang_met, f"harmful_refuse_{language_label.lower()}_met", "#dc143c")
 
+    # 2. Helper to draw vectors (thick lines) between cluster means
+    def add_vector(start_points: np.ndarray, end_points: np.ndarray, label: str, color: str) -> None:
+        mean_start = np.mean(start_points, axis=0)
+        mean_end = np.mean(end_points, axis=0)
+        
+        fig.add_trace(go.Scatter3d(
+            x=[mean_start[0], mean_end[0]],
+            y=[mean_start[1], mean_end[1]],
+            z=[mean_start[2], mean_end[2]],
+            mode="lines+markers",
+            name=label,
+            line=dict(color=color, width=6),
+            # size=[0, 8] hides the starting marker and shows an ending diamond to act as an arrowhead
+            marker=dict(size=[0, 8], color=color, symbol='diamond', opacity=1.0) 
+        ))
+
+    # Add the vectors
+    add_vector(pca_safe_eng, pca_unsafe_eng, "Refusal Vector (English)", "black")
+    add_vector(pca_safe_lang, pca_unsafe_lang_lit, f"Refusal Vector ({language_label} Lit)", "dimgray")
+    add_vector(pca_safe_lang, pca_unsafe_lang_met, f"Refusal Vector ({language_label} Met)", "crimson")
+
+    # 3. Layout formatting
     fig.update_layout(
         title=f"3D PCA Projection on English Refusal Space (Layer {layer})",
         scene=dict(
@@ -889,7 +913,12 @@ def save_pca_projection_plot_3d(
             zaxis_title="Principal Component 3"
         ),
         margin=dict(l=0, r=0, b=0, t=40),
-        legend=dict(x=0, y=1)
+        legend=dict(
+            x=1.05, 
+            y=1, 
+            title_text="Clusters & Vectors",
+            itemsizing='constant' # Keeps the legend symbols a consistent size
+        )
     )
 
     fig.write_html(str(output_path))
