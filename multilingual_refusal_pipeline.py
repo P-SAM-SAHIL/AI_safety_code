@@ -842,6 +842,57 @@ def save_pca_projection_plot(
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+def save_pca_projection_plot_3d(
+    pca_safe_eng: np.ndarray,
+    pca_unsafe_eng: np.ndarray,
+    pca_safe_lang: np.ndarray,
+    pca_unsafe_lang_lit: np.ndarray,
+    pca_unsafe_lang_met: np.ndarray,
+    output_path: Path,
+    layer: int,
+    language_label: str,
+) -> None:
+    try:
+        import plotly.graph_objects as go
+    except ImportError:
+        print("Plotly is not installed. Skipping 3D PCA plot.")
+        return
+
+    fig = go.Figure()
+
+    def add_trace(points: np.ndarray, label: str, color: str) -> None:
+        fig.add_trace(go.Scatter3d(
+            x=points[:, 0],
+            y=points[:, 1],
+            z=points[:, 2],
+            mode="markers",
+            name=label,
+            marker=dict(
+                size=4,
+                color=color,
+                opacity=0.72,
+                line=dict(width=0.5, color="white")
+            )
+        ))
+
+    add_trace(pca_safe_eng, "harmless_en", "#b0c4de")
+    add_trace(pca_unsafe_eng, "harmful_refuse_en", "#f4a460")
+    add_trace(pca_safe_lang, f"harmless_{language_label.lower()}", "#3cb371")
+    add_trace(pca_unsafe_lang_lit, f"harmful_refuse_{language_label.lower()}_lit", "#4682b4")
+    add_trace(pca_unsafe_lang_met, f"harmful_refuse_{language_label.lower()}_met", "#dc143c")
+
+    fig.update_layout(
+        title=f"3D PCA Projection on English Refusal Space (Layer {layer})",
+        scene=dict(
+            xaxis_title="Principal Component 1",
+            yaxis_title="Principal Component 2",
+            zaxis_title="Principal Component 3"
+        ),
+        margin=dict(l=0, r=0, b=0, t=40),
+        legend=dict(x=0, y=1)
+    )
+
+    fig.write_html(str(output_path))
 
 def save_cosine_similarity_plot(summary_df: pd.DataFrame, output_path: Path, layer: int) -> None:
     plt, sns = get_plot_modules()
@@ -1193,6 +1244,15 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_lang_lit_2d = pca.transform(pca_unsafe_lang_lit)
     pca_unsafe_lang_met_2d = pca.transform(pca_unsafe_lang_met)
 
+    pca_3d = PCA(n_components=3)
+    pca_3d.fit(english_baseline_states)
+
+    pca_safe_eng_3d = pca_3d.transform(pca_safe_eng)
+    pca_unsafe_eng_3d = pca_3d.transform(pca_unsafe_eng)
+    pca_safe_lang_3d = pca_3d.transform(pca_safe_lang)
+    pca_unsafe_lang_lit_3d = pca_3d.transform(pca_unsafe_lang_lit)
+    pca_unsafe_lang_met_3d = pca_3d.transform(pca_unsafe_lang_met)
+
     print("Generating first 20 tokens for Input_A_Literal and Input_B_Metaphor...")
     generation_df = align_generation_outputs(
         analysis_df=analysis_df,
@@ -1290,6 +1350,16 @@ def run_pipeline(args: argparse.Namespace) -> None:
             pca_unsafe_lang_lit_2d,
             pca_unsafe_lang_met_2d,
             artifact_path(output_dir, language, model_name, "pca_projection_on_english_refusal_plane", ".png"),
+            layer=pca_layer,
+            language_label=language,
+        )
+        save_pca_projection_plot_3d(
+            pca_safe_eng_3d,
+            pca_unsafe_eng_3d,
+            pca_safe_lang_3d,
+            pca_unsafe_lang_lit_3d,
+            pca_unsafe_lang_met_3d,
+            artifact_path(output_dir, language, model_name, "pca_projection_on_english_refusal_plane_3d", ".html"),
             layer=pca_layer,
             language_label=language,
         )
