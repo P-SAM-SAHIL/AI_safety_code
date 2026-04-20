@@ -62,11 +62,11 @@ LITERAL_COLUMN_CANDIDATES = [
     "Literal",
 ]
 
-METAPHOR_COLUMN_CANDIDATES = [
-    "Input_B_Metaphor",
-    "Input B Metaphor",
-    "metaphor",
-    "Metaphor",
+CULTURAL_CONTEXT_COLUMN_CANDIDATES = [
+    "Input_B_Cultural_Context",
+    "Input B Cultural Context",
+    "cultural_context",
+    "Cultural_Context",
 ]
 
 HARM_TYPE_COLUMN_CANDIDATES = [
@@ -144,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run multilingual refusal-vector, probe, generation, and PCA analyses "
-            "for literal vs metaphor prompts across supported instruction-tuned models."
+            "for literal vs cultural context prompts across supported instruction-tuned models."
         )
     )
     parser.add_argument("--language", required=True, help="Language code or name, e.g. amh, twi, hausa.")
@@ -167,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", default=".", help="Root directory where the output folder will be created.")
     parser.add_argument("--english-column", default=None, help="Override the unsafe English question column.")
     parser.add_argument("--literal-column", default=None, help="Override the Input_A_Literal column.")
-    parser.add_argument("--metaphor-column", default=None, help="Override the Input_B_Metaphor column.")
+    parser.add_argument("--cultural-context-column", default=None, help="Override the Input_B_Cultural_Context column.")
     parser.add_argument("--safe-eng-column", default=None, help="Override the safe English prompt column.")
     parser.add_argument("--safe-lang-column", default=None, help="Override the safe language prompt column.")
     parser.add_argument("--harm-type-column", default=None, help="Override the harm-type column for grouped plots.")
@@ -670,14 +670,14 @@ def save_internal_alignment_plot(
     layers: Sequence[int],
     output_path: Path,
     literal_column: str,
-    metaphor_column: str,
+    cultural_context_column: str,
 ) -> None:
     plt, _ = get_plot_modules()
     plt.figure(figsize=(10, 6))
     mean_dot_a = [df[f"L{layer}_Dot_A"].mean() for layer in layers]
     mean_dot_b = [df[f"L{layer}_Dot_B"].mean() for layer in layers]
     plt.plot(layers, mean_dot_a, marker="o", label=f"{literal_column} (Input A)", color="navy", linewidth=2)
-    plt.plot(layers, mean_dot_b, marker="s", label=f"{metaphor_column} (Input B)", color="darkred", linewidth=2)
+    plt.plot(layers, mean_dot_b, marker="s", label=f"{cultural_context_column} (Input B)", color="darkred", linewidth=2)
     plt.title("Internal Alignment with Refusal Direction Across Layers", fontsize=14, pad=15)
     plt.xlabel("Hidden Layer", fontsize=12)
     plt.ylabel("Average Dot Product with Refusal Direction", fontsize=12)
@@ -694,7 +694,7 @@ def save_dot_drift_bar_plot(df: pd.DataFrame, layers: Sequence[int], output_path
     mean_drift = [df[f"L{layer}_Dot_Drift"].mean() for layer in layers]
     sns.barplot(x=list(layers), y=mean_drift, color="teal")
     plt.axhline(0, color="black", linestyle="--", alpha=0.6)
-    plt.title("Mean Drift Difference by Layer (Literal - Metaphor)", fontsize=14, pad=15)
+    plt.title("Mean Drift Difference by Layer (Literal - Cultural Context)", fontsize=14, pad=15)
     plt.xlabel("Hidden Layer", fontsize=12)
     plt.ylabel("Mean Dot-Product Drift", fontsize=12)
     plt.tight_layout()
@@ -716,9 +716,9 @@ def save_sequence_cll_scatter(df: pd.DataFrame, output_path: Path) -> None:
     min_val = min(df["A_seq_cll_best_avg"].min(), df["B_seq_cll_best_avg"].min())
     max_val = max(df["A_seq_cll_best_avg"].max(), df["B_seq_cll_best_avg"].max())
     plt.plot([min_val, max_val], [min_val, max_val], "k--", alpha=0.5, label="No Difference (y=x)")
-    plt.title("Sequence-Level Refusal CLL: Literal vs Metaphor", fontsize=14, pad=15)
+    plt.title("Sequence-Level Refusal CLL: Literal vs Cultural Context", fontsize=14, pad=15)
     plt.xlabel("Best Refusal Sequence Avg Log-Prob (Literal)", fontsize=12)
-    plt.ylabel("Best Refusal Sequence Avg Log-Prob (Metaphor)", fontsize=12)
+    plt.ylabel("Best Refusal Sequence Avg Log-Prob (Cultural Context)", fontsize=12)
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -731,7 +731,7 @@ def save_probe_confidence_plot(df: pd.DataFrame, layers: Sequence[int], output_p
     mean_probe_a = [df[f"L{layer}_Probe_Prob_A"].mean() for layer in layers]
     mean_probe_b = [df[f"L{layer}_Probe_Prob_B"].mean() for layer in layers]
     plt.plot(layers, mean_probe_a, marker="o", label="Literal Translation (Input A)", color="navy", linewidth=2)
-    plt.plot(layers, mean_probe_b, marker="s", label="Cultural Metaphor (Input B)", color="darkorange", linewidth=2)
+    plt.plot(layers, mean_probe_b, marker="s", label="Cultural Context (Input B)", color="darkorange", linewidth=2)
     plt.title("Layer-wise Linear Probe Confidence Across Layers", fontsize=14, pad=15)
     plt.xlabel("Hidden Layer", fontsize=12)
     plt.ylabel("Average Probe Probability", fontsize=12)
@@ -771,7 +771,7 @@ def save_harm_category_plot(df: pd.DataFrame, harm_type_column: str, output_path
     harm_df["Input Type"] = harm_df["Input Type"].replace(
         {
             "A_seq_cll_best_avg": "Literal Translation",
-            "B_seq_cll_best_avg": "Cultural Metaphor",
+            "B_seq_cll_best_avg": "Cultural Context",
         }
     )
 
@@ -798,7 +798,7 @@ def save_pca_projection_plot(
     pca_unsafe_eng: np.ndarray,
     pca_safe_lang: np.ndarray,
     pca_unsafe_lang_lit: np.ndarray,
-    pca_unsafe_lang_met: np.ndarray,
+    pca_unsafe_lang_cult: np.ndarray,
     output_path: Path,
     layer: int,
     language_label: str,
@@ -822,13 +822,13 @@ def save_pca_projection_plot(
     add_group(pca_unsafe_eng, "harmful_refuse_en", "#f4a460")
     add_group(pca_safe_lang, f"harmless_{language_label.lower()}", "#3cb371")
     add_group(pca_unsafe_lang_lit, f"harmful_refuse_{language_label.lower()}_lit", "#4682b4")
-    add_group(pca_unsafe_lang_met, f"harmful_refuse_{language_label.lower()}_met", "#dc143c")
+    add_group(pca_unsafe_lang_cult, f"harmful_refuse_{language_label.lower()}_cult", "#dc143c")
 
     mean_safe_eng_2d = np.mean(pca_safe_eng, axis=0)
     mean_unsafe_eng_2d = np.mean(pca_unsafe_eng, axis=0)
     mean_safe_lang_2d = np.mean(pca_safe_lang, axis=0)
     mean_unsafe_lang_lit_2d = np.mean(pca_unsafe_lang_lit, axis=0)
-    mean_unsafe_lang_met_2d = np.mean(pca_unsafe_lang_met, axis=0)
+    mean_unsafe_lang_met_2d = np.mean(pca_unsafe_lang_cult, axis=0)
 
     plt.annotate("", xy=mean_unsafe_eng_2d, xytext=mean_safe_eng_2d, arrowprops=dict(arrowstyle="->", color="black", lw=2.4))
     plt.annotate("", xy=mean_unsafe_lang_lit_2d, xytext=mean_safe_lang_2d, arrowprops=dict(arrowstyle="->", color="dimgray", lw=2.4))
@@ -847,7 +847,7 @@ def save_pca_projection_plot_3d(
     pca_unsafe_eng: np.ndarray,
     pca_safe_lang: np.ndarray,
     pca_unsafe_lang_lit: np.ndarray,
-    pca_unsafe_lang_met: np.ndarray,
+    pca_unsafe_lang_cult: np.ndarray,
     output_path: Path,
     layer: int,
     language_label: str,
@@ -881,7 +881,7 @@ def save_pca_projection_plot_3d(
     add_trace(pca_unsafe_eng, "harmful_refuse_en", "#f4a460")
     add_trace(pca_safe_lang, f"harmless_{language_label.lower()}", "#3cb371")
     add_trace(pca_unsafe_lang_lit, f"harmful_refuse_{language_label.lower()}_lit", "#4682b4")
-    add_trace(pca_unsafe_lang_met, f"harmful_refuse_{language_label.lower()}_met", "#dc143c")
+    add_trace(pca_unsafe_lang_cult, f"harmful_refuse_{language_label.lower()}_cult", "#dc143c")
 
     # 2. Helper to draw vectors (thick lines) between cluster means
     def add_vector(start_points: np.ndarray, end_points: np.ndarray, label: str, color: str) -> None:
@@ -902,7 +902,7 @@ def save_pca_projection_plot_3d(
     # Add the vectors
     add_vector(pca_safe_eng, pca_unsafe_eng, "Refusal Vector (English)", "black")
     add_vector(pca_safe_lang, pca_unsafe_lang_lit, f"Refusal Vector ({language_label} Lit)", "dimgray")
-    add_vector(pca_safe_lang, pca_unsafe_lang_met, f"Refusal Vector ({language_label} Met)", "crimson")
+    add_vector(pca_safe_lang, pca_unsafe_lang_cult, f"Refusal Vector ({language_label} Met)", "crimson")
 
     # 3. Layout formatting
     fig.update_layout(
@@ -931,8 +931,8 @@ def save_cosine_similarity_plot(summary_df: pd.DataFrame, output_path: Path, lay
 
     display_names = {
         "cosine_similarity_english_vs_literal": "English vs Literal",
-        "cosine_similarity_english_vs_metaphor": "English vs Metaphor",
-        "cosine_similarity_literal_vs_metaphor": "Literal vs Metaphor",
+        "cosine_similarity_english_vs_metaphor": "English vs Cultural Context",
+        "cosine_similarity_literal_vs_metaphor": "Literal vs Cultural Context",
     }
     bar_df["label"] = bar_df["metric"].map(display_names).fillna(bar_df["metric"])
 
@@ -966,7 +966,7 @@ def print_probe_summary(probe_df: pd.DataFrame) -> None:
 def align_generation_outputs(
     analysis_df: pd.DataFrame,
     literal_column: str,
-    metaphor_column: str,
+    cultural_context_column: str,
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
     input_device: torch.device,
@@ -974,7 +974,7 @@ def align_generation_outputs(
     batch_size: int,
 ) -> pd.DataFrame:
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
-    metaphor_prompts = analysis_df[metaphor_column].astype(str).tolist()
+    cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
 
     literal_records = generate_first_tokens_for_prompts(
         literal_prompts,
@@ -984,8 +984,8 @@ def align_generation_outputs(
         max_new_tokens=max_new_tokens,
         batch_size=batch_size,
     )
-    metaphor_records = generate_first_tokens_for_prompts(
-        metaphor_prompts,
+    cultural_context_records = generate_first_tokens_for_prompts(
+        cultural_context_prompts,
         tokenizer,
         model,
         input_device,
@@ -993,13 +993,13 @@ def align_generation_outputs(
         batch_size=batch_size,
     )
 
-    generation_df = analysis_df[["row_index", literal_column, metaphor_column]].copy()
+    generation_df = analysis_df[["row_index", literal_column, cultural_context_column]].copy()
     generation_df["Input_A_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in literal_records]
     generation_df["Input_A_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in literal_records]
     generation_df["Input_A_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in literal_records]
-    generation_df["Input_B_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in metaphor_records]
-    generation_df["Input_B_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in metaphor_records]
-    generation_df["Input_B_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in metaphor_records]
+    generation_df["Input_B_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in cultural_context_records]
+    generation_df["Input_B_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in cultural_context_records]
+    generation_df["Input_B_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in cultural_context_records]
     return generation_df
 
 
@@ -1047,7 +1047,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     english_column = infer_column(experiment_df, args.english_column, ENGLISH_QUESTION_COLUMN_CANDIDATES, "unsafe English prompts")
     literal_column = infer_column(experiment_df, args.literal_column, LITERAL_COLUMN_CANDIDATES, "literal prompts")
-    metaphor_column = infer_column(experiment_df, args.metaphor_column, METAPHOR_COLUMN_CANDIDATES, "metaphor prompts")
+    cultural_context_column = infer_column(experiment_df, args.cultural_context_column, CULTURAL_CONTEXT_COLUMN_CANDIDATES, "cultural context prompts")
     safe_eng_column = infer_column(safe_eng_df, args.safe_eng_column, SAFE_PROMPT_COLUMN_CANDIDATES, "safe English prompts")
     safe_lang_column = infer_column(safe_lang_df, args.safe_lang_column, SAFE_LANG_COLUMN_CANDIDATES, "safe language prompts")
     harm_type_column = maybe_infer_column(experiment_df, args.harm_type_column, HARM_TYPE_COLUMN_CANDIDATES)
@@ -1056,13 +1056,13 @@ def run_pipeline(args: argparse.Namespace) -> None:
     safe_prompts_lang = safe_lang_df[safe_lang_column].dropna().astype(str).tolist()
     unsafe_prompts_eng = experiment_df[english_column].dropna().astype(str).tolist()
 
-    analysis_mask = experiment_df[literal_column].notna() & experiment_df[metaphor_column].notna()
+    analysis_mask = experiment_df[literal_column].notna() & experiment_df[cultural_context_column].notna()
     analysis_df = experiment_df.loc[analysis_mask].copy().reset_index().rename(columns={"index": "row_index"})
     if analysis_df.empty:
-        raise ValueError("No rows contained both literal and metaphor prompts.")
+        raise ValueError("No rows contained both literal and cultural context prompts.")
 
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
-    metaphor_prompts = analysis_df[metaphor_column].astype(str).tolist()
+    cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
 
     refusal_sequences = get_refusal_sequences(language)
     refusal_sequence_candidates = tokenize_candidate_sequences(tokenizer, refusal_sequences)
@@ -1090,7 +1090,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     for layer in target_layers:
         refusal_vectors[layer] = unsafe_hiddens[layer].mean(dim=0) - safe_hiddens[layer].mean(dim=0)
 
-    print("Extracting hidden states for literal and metaphor prompts...")
+    print("Extracting hidden states for literal and cultural context prompts...")
     literal_hiddens = get_last_token_hidden_states(
         literal_prompts,
         target_layers,
@@ -1099,8 +1099,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         input_device,
         batch_size=args.hidden_batch_size,
     )
-    metaphor_hiddens = get_last_token_hidden_states(
-        metaphor_prompts,
+    cultural_context_hiddens = get_last_token_hidden_states(
+        cultural_context_prompts,
         target_layers,
         tokenizer,
         model,
@@ -1108,7 +1108,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         batch_size=args.hidden_batch_size,
     )
 
-    results_df = analysis_df[["row_index", literal_column, metaphor_column]].copy()
+    results_df = analysis_df[["row_index", literal_column, cultural_context_column]].copy()
     if english_column in analysis_df.columns:
         results_df[english_column] = analysis_df[english_column]
     if harm_type_column and harm_type_column in analysis_df.columns:
@@ -1118,7 +1118,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     for layer in target_layers:
         ref_vec = refusal_vectors[layer]
         dot_a = literal_hiddens[layer] @ ref_vec
-        dot_b = metaphor_hiddens[layer] @ ref_vec
+        dot_b = cultural_context_hiddens[layer] @ ref_vec
         results_df[f"L{layer}_Dot_A"] = dot_a.numpy()
         results_df[f"L{layer}_Dot_B"] = dot_b.numpy()
         results_df[f"L{layer}_Dot_Drift"] = (dot_a - dot_b).numpy()
@@ -1139,7 +1139,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         probe_summaries.append(summary)
 
         logits_a, probs_a = apply_linear_probe(literal_hiddens[layer], probe_bundle)
-        logits_b, probs_b = apply_linear_probe(metaphor_hiddens[layer], probe_bundle)
+        logits_b, probs_b = apply_linear_probe(cultural_context_hiddens[layer], probe_bundle)
 
         results_df[f"L{layer}_Probe_Logit_A"] = logits_a.numpy()
         results_df[f"L{layer}_Probe_Logit_B"] = logits_b.numpy()
@@ -1169,7 +1169,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         )
         seq_metrics_b.append(
             get_sequence_level_refusal_metrics(
-                str(row[metaphor_column]),
+                str(row[cultural_context_column]),
                 refusal_sequence_candidates,
                 tokenizer,
                 model,
@@ -1221,8 +1221,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         input_device,
         batch_size=args.hidden_batch_size,
     )[pca_layer].numpy()
-    pca_unsafe_lang_met = get_last_token_hidden_states(
-        metaphor_prompts,
+    pca_unsafe_lang_cult = get_last_token_hidden_states(
+        cultural_context_prompts,
         [pca_layer],
         tokenizer,
         model,
@@ -1234,7 +1234,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     mu_unsafe_eng = np.mean(pca_unsafe_eng, axis=0)
     mu_safe_lang = np.mean(pca_safe_lang, axis=0)
     mu_unsafe_lang_lit = np.mean(pca_unsafe_lang_lit, axis=0)
-    mu_unsafe_lang_met = np.mean(pca_unsafe_lang_met, axis=0)
+    mu_unsafe_lang_met = np.mean(pca_unsafe_lang_cult, axis=0)
 
     v_en = mu_unsafe_eng - mu_safe_eng
     v_lang_lit = mu_unsafe_lang_lit - mu_safe_lang
@@ -1271,7 +1271,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_eng_2d = pca.transform(pca_unsafe_eng)
     pca_safe_lang_2d = pca.transform(pca_safe_lang)
     pca_unsafe_lang_lit_2d = pca.transform(pca_unsafe_lang_lit)
-    pca_unsafe_lang_met_2d = pca.transform(pca_unsafe_lang_met)
+    pca_unsafe_lang_met_2d = pca.transform(pca_unsafe_lang_cult)
 
     pca_3d = PCA(n_components=3)
     pca_3d.fit(english_baseline_states)
@@ -1280,13 +1280,13 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_eng_3d = pca_3d.transform(pca_unsafe_eng)
     pca_safe_lang_3d = pca_3d.transform(pca_safe_lang)
     pca_unsafe_lang_lit_3d = pca_3d.transform(pca_unsafe_lang_lit)
-    pca_unsafe_lang_met_3d = pca_3d.transform(pca_unsafe_lang_met)
+    pca_unsafe_lang_met_3d = pca_3d.transform(pca_unsafe_lang_cult)
 
     print("Generating first 20 tokens for Input_A_Literal and Input_B_Metaphor...")
     generation_df = align_generation_outputs(
         analysis_df=analysis_df,
         literal_column=literal_column,
-        metaphor_column=metaphor_column,
+        cultural_context_column=cultural_context_column,
         tokenizer=tokenizer,
         model=model,
         input_device=input_device,
@@ -1294,7 +1294,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         batch_size=args.generation_batch_size,
     )
 
-    join_drop_columns = [literal_column, metaphor_column]
+    join_drop_columns = [literal_column, cultural_context_column]
     if english_column in results_df.columns:
         join_drop_columns.append(english_column)
     if harm_type_column and harm_type_column in results_df.columns:
@@ -1335,7 +1335,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             "columns": {
                 "english_column": english_column,
                 "literal_column": literal_column,
-                "metaphor_column": metaphor_column,
+                "cultural_context_column": cultural_context_column,
                 "safe_eng_column": safe_eng_column,
                 "safe_lang_column": safe_lang_column,
                 "harm_type_column": harm_type_column,
@@ -1351,7 +1351,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             target_layers,
             artifact_path(output_dir, language, model_name, "internal_alignment_with_refusal_direction_across_layers", ".png"),
             literal_column,
-            metaphor_column,
+            cultural_context_column,
         )
         save_dot_drift_bar_plot(
             results_df,
