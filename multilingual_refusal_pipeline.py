@@ -828,11 +828,11 @@ def save_pca_projection_plot(
     mean_unsafe_eng_2d = np.mean(pca_unsafe_eng, axis=0)
     mean_safe_lang_2d = np.mean(pca_safe_lang, axis=0)
     mean_unsafe_lang_lit_2d = np.mean(pca_unsafe_lang_lit, axis=0)
-    mean_unsafe_lang_met_2d = np.mean(pca_unsafe_lang_cult, axis=0)
+    mean_unsafe_lang_cult_2d = np.mean(pca_unsafe_lang_cult, axis=0)
 
     plt.annotate("", xy=mean_unsafe_eng_2d, xytext=mean_safe_eng_2d, arrowprops=dict(arrowstyle="->", color="black", lw=2.4))
     plt.annotate("", xy=mean_unsafe_lang_lit_2d, xytext=mean_safe_lang_2d, arrowprops=dict(arrowstyle="->", color="dimgray", lw=2.4))
-    plt.annotate("", xy=mean_unsafe_lang_met_2d, xytext=mean_safe_lang_2d, arrowprops=dict(arrowstyle="->", color="crimson", lw=2.4))
+    plt.annotate("", xy=mean_unsafe_lang_cult_2d, xytext=mean_safe_lang_2d, arrowprops=dict(arrowstyle="->", color="crimson", lw=2.4))
 
     plt.title(f"PCA Projection on English Refusal Plane (Layer {layer})", fontsize=14, pad=15)
     plt.xlabel("Principal Component 1 (English Variance)", fontsize=12)
@@ -1254,7 +1254,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 "value": float((dot_en_vs_lang_lit / dot_en_self) * 100) if dot_en_self else float("nan"),
             },
             {
-                "metric": "retained_refusal_magnitude_pct_metaphor",
+                "metric": "retained_refusal_magnitude_pct_cultural_context",
                 "value": float((dot_en_vs_lang_cult / dot_en_self) * 100) if dot_en_self else float("nan"),
             },
             {"metric": "cosine_similarity_english_vs_literal", "value": safe_cosine_similarity(v_en, v_lang_lit)},
@@ -1282,7 +1282,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_lang_lit_3d = pca_3d.transform(pca_unsafe_lang_lit)
     pca_unsafe_lang_cult_3d = pca_3d.transform(pca_unsafe_lang_cult)
 
-    print("Generating first 20 tokens for Input_A_Literal and Input_B_Metaphor...")
+    print("Generating first 20 tokens for Input_A_Literal and Input_B_Cultural_Context...")
     generation_df = align_generation_outputs(
         analysis_df=analysis_df,
         literal_column=literal_column,
@@ -1410,7 +1410,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     print(f"Pipeline complete. Outputs saved to {output_dir}")
     print(f"Main layer-wise analysis CSV: {main_results_path}")
     print(f"Linear probe summary CSV: {probe_summary_path}")
-    print(f"Literal/metaphor generation CSV: {generation_path}")
+    print(f"Literal/cultural generation CSV: {generation_path}")
     print(f"Alignment summary CSV: {alignment_summary_path}")
 
 
