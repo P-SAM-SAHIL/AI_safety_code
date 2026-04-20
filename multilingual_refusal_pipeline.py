@@ -902,7 +902,7 @@ def save_pca_projection_plot_3d(
     # Add the vectors
     add_vector(pca_safe_eng, pca_unsafe_eng, "Refusal Vector (English)", "black")
     add_vector(pca_safe_lang, pca_unsafe_lang_lit, f"Refusal Vector ({language_label} Lit)", "dimgray")
-    add_vector(pca_safe_lang, pca_unsafe_lang_cult, f"Refusal Vector ({language_label} Met)", "crimson")
+    add_vector(pca_safe_lang, pca_unsafe_lang_cult, f"Refusal Vector ({language_label} Cult)", "crimson")
 
     # 3. Layout formatting
     fig.update_layout(
@@ -931,8 +931,8 @@ def save_cosine_similarity_plot(summary_df: pd.DataFrame, output_path: Path, lay
 
     display_names = {
         "cosine_similarity_english_vs_literal": "English vs Literal",
-        "cosine_similarity_english_vs_metaphor": "English vs Cultural Context",
-        "cosine_similarity_literal_vs_metaphor": "Literal vs Cultural Context",
+        "cosine_similarity_english_vs_cultural_context": "English vs Cultural Context",
+        "cosine_similarity_literal_vs_cultural_context": "Literal vs Cultural Context",
     }
     bar_df["label"] = bar_df["metric"].map(display_names).fillna(bar_df["metric"])
 
@@ -1234,32 +1234,32 @@ def run_pipeline(args: argparse.Namespace) -> None:
     mu_unsafe_eng = np.mean(pca_unsafe_eng, axis=0)
     mu_safe_lang = np.mean(pca_safe_lang, axis=0)
     mu_unsafe_lang_lit = np.mean(pca_unsafe_lang_lit, axis=0)
-    mu_unsafe_lang_met = np.mean(pca_unsafe_lang_cult, axis=0)
+    mu_unsafe_lang_cult = np.mean(pca_unsafe_lang_cult, axis=0)
 
     v_en = mu_unsafe_eng - mu_safe_eng
     v_lang_lit = mu_unsafe_lang_lit - mu_safe_lang
-    v_lang_met = mu_unsafe_lang_met - mu_safe_lang
+    v_lang_cult = mu_unsafe_lang_cult - mu_safe_lang
 
     dot_en_self = float(np.dot(v_en, v_en))
     dot_en_vs_lang_lit = float(np.dot(v_en, v_lang_lit))
-    dot_en_vs_lang_met = float(np.dot(v_en, v_lang_met))
+    dot_en_vs_lang_cult = float(np.dot(v_en, v_lang_cult))
 
     alignment_summary_df = pd.DataFrame(
         [
             {"metric": "dot_product_english_self", "value": dot_en_self},
             {"metric": "dot_product_english_vs_literal", "value": dot_en_vs_lang_lit},
-            {"metric": "dot_product_english_vs_metaphor", "value": dot_en_vs_lang_met},
+            {"metric": "dot_product_english_vs_cultural_context", "value": dot_en_vs_lang_cult},
             {
                 "metric": "retained_refusal_magnitude_pct_literal",
                 "value": float((dot_en_vs_lang_lit / dot_en_self) * 100) if dot_en_self else float("nan"),
             },
             {
                 "metric": "retained_refusal_magnitude_pct_metaphor",
-                "value": float((dot_en_vs_lang_met / dot_en_self) * 100) if dot_en_self else float("nan"),
+                "value": float((dot_en_vs_lang_cult / dot_en_self) * 100) if dot_en_self else float("nan"),
             },
             {"metric": "cosine_similarity_english_vs_literal", "value": safe_cosine_similarity(v_en, v_lang_lit)},
-            {"metric": "cosine_similarity_english_vs_metaphor", "value": safe_cosine_similarity(v_en, v_lang_met)},
-            {"metric": "cosine_similarity_literal_vs_metaphor", "value": safe_cosine_similarity(v_lang_lit, v_lang_met)},
+            {"metric": "cosine_similarity_english_vs_cultural_context", "value": safe_cosine_similarity(v_en, v_lang_cult)},
+            {"metric": "cosine_similarity_literal_vs_cultural_context", "value": safe_cosine_similarity(v_lang_lit, v_lang_cult)},
         ]
     )
 
@@ -1271,7 +1271,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_eng_2d = pca.transform(pca_unsafe_eng)
     pca_safe_lang_2d = pca.transform(pca_safe_lang)
     pca_unsafe_lang_lit_2d = pca.transform(pca_unsafe_lang_lit)
-    pca_unsafe_lang_met_2d = pca.transform(pca_unsafe_lang_cult)
+    pca_unsafe_lang_cult_2d = pca.transform(pca_unsafe_lang_cult)
 
     pca_3d = PCA(n_components=3)
     pca_3d.fit(english_baseline_states)
@@ -1280,7 +1280,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_eng_3d = pca_3d.transform(pca_unsafe_eng)
     pca_safe_lang_3d = pca_3d.transform(pca_safe_lang)
     pca_unsafe_lang_lit_3d = pca_3d.transform(pca_unsafe_lang_lit)
-    pca_unsafe_lang_met_3d = pca_3d.transform(pca_unsafe_lang_cult)
+    pca_unsafe_lang_cult_3d = pca_3d.transform(pca_unsafe_lang_cult)
 
     print("Generating first 20 tokens for Input_A_Literal and Input_B_Metaphor...")
     generation_df = align_generation_outputs(
@@ -1307,7 +1307,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     main_results_path = artifact_path(output_dir, language, model_name, "layerwise_analysis", ".csv")
     probe_summary_path = artifact_path(output_dir, language, model_name, "linear_probe_summary", ".csv")
-    generation_path = artifact_path(output_dir, language, model_name, "literal_metaphor_first20_generations", ".csv")
+    generation_path = artifact_path(output_dir, language, model_name, "literal_cultural_context_first20_generations", ".csv")
     alignment_summary_path = artifact_path(output_dir, language, model_name, "alignment_summary", ".csv")
     refusal_path = artifact_path(output_dir, language, model_name, "refusal_sequences", ".json")
     config_path = artifact_path(output_dir, language, model_name, "run_config", ".json")
@@ -1360,7 +1360,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         )
         save_sequence_cll_scatter(
             results_df,
-            artifact_path(output_dir, language, model_name, "sequence_level_refusal_cll_literal_vs_metaphor", ".png"),
+            artifact_path(output_dir, language, model_name, "sequence_level_refusal_cll_literal_vs_cultural_context", ".png"),
         )
         save_probe_confidence_plot(
             results_df,
@@ -1377,7 +1377,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             pca_unsafe_eng_2d,
             pca_safe_lang_2d,
             pca_unsafe_lang_lit_2d,
-            pca_unsafe_lang_met_2d,
+            pca_unsafe_lang_cult_2d,
             artifact_path(output_dir, language, model_name, "pca_projection_on_english_refusal_plane", ".png"),
             layer=pca_layer,
             language_label=language,
@@ -1387,7 +1387,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             pca_unsafe_eng_3d,
             pca_safe_lang_3d,
             pca_unsafe_lang_lit_3d,
-            pca_unsafe_lang_met_3d,
+            pca_unsafe_lang_cult_3d,
             artifact_path(output_dir, language, model_name, "pca_projection_on_english_refusal_plane_3d", ".html"),
             layer=pca_layer,
             language_label=language,
