@@ -103,17 +103,28 @@ class ModelPreset:
 
 
 MODEL_PRESETS: Dict[str, ModelPreset] = {
-        "mistralai/Mistral-7B-Instruct-v0.3": ModelPreset(
+    "mistralai/Mistral-7B-Instruct-v0.3": ModelPreset(
         model_id="mistralai/Mistral-7B-Instruct-v0.3",
         output_name="mistral",
         total_layers=32,
         layer_start=14,
         layer_end=24,
         pca_layer=16,
-    ),    "Qwen/Qwen3-8B": ModelPreset(
-        model_id="Qwen/Qwen3-8B",
-        output_name="qwen",
-        total_layers=36,
+    ),
+    # --- UPDATED QWEN 2.5 PRESET ---
+    "Qwen/Qwen2.5-7B-Instruct": ModelPreset(
+        model_id="Qwen/Qwen2.5-7B-Instruct",
+        output_name="qwen2_5",
+        total_layers=28,  # Verify this for the specific Qwen architecture
+        layer_start=12,
+        layer_end=20,
+        pca_layer=16,
+    ),
+    # --- NEW AFRIQUEQWEN PRESET ---
+    "McGill-NLP/AfriqueQwen-8B": ModelPreset(
+        model_id="McGill-NLP/AfriqueQwen-8B",
+        output_name="afriqueqwen",
+        total_layers=36,  # Update based on AfriqueQwen's actual architecture
         layer_start=16,
         layer_end=28,
         pca_layer=20,
@@ -131,8 +142,12 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
 MODEL_ALIASES = {
     "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
     "mistral7b": "mistralai/Mistral-7B-Instruct-v0.3",
-    "qwen": "Qwen/Qwen3-8B",
-    "qwen3": "Qwen/Qwen3-8B",
+    # --- UPDATED QWEN ALIASES ---
+    "qwen": "Qwen/Qwen2.5-7B-Instruct",
+    "qwen2.5": "Qwen/Qwen2.5-7B-Instruct",
+    # --- NEW AFRIQUEQWEN ALIASES ---
+    "afriqueqwen": "McGill-NLP/AfriqueQwen-8B",
+    "afrique": "McGill-NLP/AfriqueQwen-8B",
     "llama": "meta-llama/Llama-3.1-8B-Instruct",
     "llama31": "meta-llama/Llama-3.1-8B-Instruct",
 }
@@ -153,7 +168,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Model ID or alias. Supported presets: mistralai/Mistral-7B-Instruct-v0.3, "
-            "Qwen/Qwen3-8B, meta-llama/Llama-3.1-8B-Instruct, or aliases mistral/qwen/llama."
+            "Qwen/Qwen2.5-7B-Instruct, McGill-NLP/AfriqueQwen-8B, meta-llama/Llama-3.1-8B-Instruct, "
+            "or aliases mistral/qwen/afriqueqwen/llama."
         ),
     )
     parser.add_argument(
