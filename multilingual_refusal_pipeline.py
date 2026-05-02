@@ -96,6 +96,8 @@ class ModelPreset:
     layer_start: int
     layer_end: int
     pca_layer: int
+    is_chat: bool = True              # <-- NEW
+    ban_think_tokens: bool = False    # <-- NEW
 
     @property
     def target_layers(self) -> Tuple[int, ...]:
@@ -128,6 +130,8 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
         layer_start=16,
         layer_end=28,
         pca_layer=20,
+        is_chat=False,            # <-- Base model formatting
+        ban_think_tokens=True,    # <-- Only ban <think> here
     ),
     "meta-llama/Llama-3.1-8B-Instruct": ModelPreset(
         model_id="meta-llama/Llama-3.1-8B-Instruct",
@@ -284,10 +288,10 @@ def get_input_device(model: AutoModelForCausalLM) -> torch.device:
     return next(model.parameters()).device
 
 
-def format_chat_prompts(tokenizer: AutoTokenizer, prompts: Sequence[str]) -> List[str]:
+def format_prompts(tokenizer: AutoTokenizer, prompts: Sequence[str], is_chat: bool = True) -> List[str]:
     formatted: List[str] = []
     for prompt in prompts:
-        if getattr(tokenizer, "chat_template", None):
+        if is_chat and getattr(tokenizer, "chat_template", None):
             formatted.append(
                 tokenizer.apply_chat_template(
                     [{"role": "user", "content": str(prompt)}],
@@ -296,7 +300,8 @@ def format_chat_prompts(tokenizer: AutoTokenizer, prompts: Sequence[str]) -> Lis
                 )
             )
         else:
-            formatted.append(str(prompt))
+            # Base Model formatting
+            formatted.append(f"Question: {prompt}\nAnswer: ")
     return formatted
 
 
@@ -307,6 +312,7 @@ def get_last_token_hidden_states(
     model: AutoModelForCausalLM,
     input_device: torch.device,
     batch_size: int,
+    is_chat: bool = True,
 ) -> Dict[int, torch.Tensor]:
     if not prompts:
         raise ValueError("No prompts were provided for hidden-state extraction.")
@@ -317,7 +323,7 @@ def get_last_token_hidden_states(
 
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start : start + batch_size]
-        formatted_prompts = format_chat_prompts(tokenizer, batch_prompts)
+        formatted_prompts = format_prompts(tokenizer, batch_prompts, is_chat=is_chat)
         inputs = tokenizer(
             formatted_prompts,
             return_tensors="pt",
@@ -502,11 +508,12 @@ def get_sequence_level_refusal_metrics(
     model: AutoModelForCausalLM,
     input_device: torch.device,
     batch_size: int,
+    is_chat: bool = True,  # <-- NEW
 ) -> Dict[str, object]:
     ensure_pad_token(tokenizer)
     tokenizer.padding_side = "right"
 
-    prompt_text = format_chat_prompts(tokenizer, [prompt])[0]
+    prompt_text = format_prompts(tokenizer, [prompt], is_chat=is_chat)[0]
     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
     if not prompt_ids:
         raise ValueError("Prompt produced no tokens.")
@@ -574,6 +581,8 @@ def generate_first_tokens_for_prompts(
     input_device: torch.device,
     max_new_tokens: int,
     batch_size: int,
+    is_chat: bool = True,           # <-- NEW
+    ban_think_tokens: bool = False, # <-- NEW
 ) -> List[Dict[str, str]]:
     if not prompts:
         return []
@@ -582,9 +591,19 @@ def generate_first_tokens_for_prompts(
     tokenizer.padding_side = "left"
     records: List[Dict[str, str]] = []
 
+    bad_words_ids = None
+    if ban_think_tokens:
+        bad_words_ids = []
+        for t in ["<think>", "</think>"]:
+            tid = tokenizer.convert_tokens_to_ids(t)
+            if tid is not None and tid != getattr(tokenizer, "unk_token_id", None):
+                bad_words_ids.append([tid])
+        if not bad_words_ids:
+            bad_words_ids = None
+
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start : start + batch_size]
-        formatted_prompts = format_chat_prompts(tokenizer, batch_prompts)
+        formatted_prompts = format_prompts(tokenizer, batch_prompts, is_chat=is_chat)
         inputs = tokenizer(
             formatted_prompts,
             return_tensors="pt",
@@ -598,6 +617,7 @@ def generate_first_tokens_for_prompts(
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
+                bad_words_ids=bad_words_ids,
             )
 
         prompt_width = inputs["input_ids"].shape[1]
@@ -988,25 +1008,17 @@ def align_generation_outputs(
     input_device: torch.device,
     max_new_tokens: int,
     batch_size: int,
+    is_chat: bool = True,           # <-- NEW
+    ban_think_tokens: bool = False,
 ) -> pd.DataFrame:
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
     cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
 
     literal_records = generate_first_tokens_for_prompts(
-        literal_prompts,
-        tokenizer,
-        model,
-        input_device,
-        max_new_tokens=max_new_tokens,
-        batch_size=batch_size,
+        literal_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens # <-- PASSED DOWN
     )
     cultural_context_records = generate_first_tokens_for_prompts(
-        cultural_context_prompts,
-        tokenizer,
-        model,
-        input_device,
-        max_new_tokens=max_new_tokens,
-        batch_size=batch_size,
+        cultural_context_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens # <-- PASSED DOWN
     )
 
     generation_df = analysis_df[["row_index", literal_column, cultural_context_column]].copy()
@@ -1028,6 +1040,10 @@ def run_pipeline(args: argparse.Namespace) -> None:
         layer_end=args.layer_end,
         pca_layer=args.pca_layer,
     )
+    
+    # Flags extracted from the preset
+    is_chat_model = preset.is_chat if preset else True
+    ban_think = preset.ban_think_tokens if preset else False
 
     output_dir = Path(args.output_root) / f"{sanitize_name(language)}_{sanitize_name(model_name)}_output"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1091,6 +1107,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )
     unsafe_hiddens = get_last_token_hidden_states(
         unsafe_prompts_eng,
@@ -1099,6 +1116,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )
 
     print("Building refusal vectors with difference-in-means...")
@@ -1114,6 +1132,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )
     cultural_context_hiddens = get_last_token_hidden_states(
         cultural_context_prompts,
@@ -1122,6 +1141,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )
 
     results_df = analysis_df[["row_index", literal_column, cultural_context_column]].copy()
@@ -1181,6 +1201,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 model,
                 input_device,
                 batch_size=args.sequence_cll_batch_size,
+                is_chat=is_chat_model, # <--- UPDATED
             )
         )
         seq_metrics_b.append(
@@ -1191,6 +1212,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 model,
                 input_device,
                 batch_size=args.sequence_cll_batch_size,
+                is_chat=is_chat_model, # <--- UPDATED
             )
         )
 
@@ -1212,7 +1234,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )[pca_layer].numpy()
+    
     pca_unsafe_eng = get_last_token_hidden_states(
         unsafe_prompts_eng,
         [pca_layer],
@@ -1220,7 +1244,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )[pca_layer].numpy()
+    
     pca_safe_lang = get_last_token_hidden_states(
         safe_prompts_lang,
         [pca_layer],
@@ -1228,7 +1254,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )[pca_layer].numpy()
+    
     pca_unsafe_lang_lit = get_last_token_hidden_states(
         literal_prompts,
         [pca_layer],
@@ -1236,7 +1264,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )[pca_layer].numpy()
+    
     pca_unsafe_lang_cult = get_last_token_hidden_states(
         cultural_context_prompts,
         [pca_layer],
@@ -1244,6 +1274,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         model,
         input_device,
         batch_size=args.hidden_batch_size,
+        is_chat=is_chat_model, # <--- UPDATED
     )[pca_layer].numpy()
 
     mu_safe_eng = np.mean(pca_safe_eng, axis=0)
@@ -1308,6 +1339,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
         input_device=input_device,
         max_new_tokens=args.max_new_tokens,
         batch_size=args.generation_batch_size,
+        is_chat=is_chat_model,          # <--- UPDATED
+        ban_think_tokens=ban_think,     # <--- UPDATED
     )
 
     join_drop_columns = [literal_column, cultural_context_column]
