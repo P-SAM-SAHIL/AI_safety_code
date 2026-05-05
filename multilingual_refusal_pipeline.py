@@ -1084,17 +1084,27 @@ def run_pipeline(args: argparse.Namespace) -> None:
     safe_lang_column = infer_column(safe_lang_df, args.safe_lang_column, SAFE_LANG_COLUMN_CANDIDATES, "safe language prompts")
     harm_type_column = maybe_infer_column(experiment_df, args.harm_type_column, HARM_TYPE_COLUMN_CANDIDATES)
 
-    safe_prompts_eng = safe_eng_df[safe_eng_column].dropna().astype(str).tolist()
-    safe_prompts_lang = safe_lang_df[safe_lang_column].dropna().astype(str).tolist()
-    unsafe_prompts_eng = experiment_df[english_column].dropna().astype(str).tolist()
-
-    analysis_mask = experiment_df[literal_column].notna() & experiment_df[cultural_context_column].notna()
+    # Filter for rows that have all three harmful prompt variations to ensure parallel size
+    analysis_mask = (
+        experiment_df[literal_column].notna() & 
+        experiment_df[cultural_context_column].notna() &
+        experiment_df[english_column].notna()
+    )
     analysis_df = experiment_df.loc[analysis_mask].copy().reset_index().rename(columns={"index": "row_index"})
     if analysis_df.empty:
         raise ValueError("No rows contained both literal and cultural context prompts.")
 
+    # Determine the exact length of the Harm Lang prompts
+    target_length = len(analysis_df)
+
+    # Extract the harmful prompts
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
     cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
+    unsafe_prompts_eng = analysis_df[english_column].astype(str).tolist()
+
+    # Truncate the safe datasets to match the size of the harmful target length
+    safe_prompts_eng = safe_eng_df[safe_eng_column].dropna().astype(str).tolist()[:target_length]
+    safe_prompts_lang = safe_lang_df[safe_lang_column].dropna().astype(str).tolist()[:target_length]
 
     refusal_sequences = get_refusal_sequences(language)
     refusal_sequence_candidates = tokenize_candidate_sequences(tokenizer, refusal_sequences)
