@@ -1001,6 +1001,7 @@ def print_probe_summary(probe_df: pd.DataFrame) -> None:
 
 def align_generation_outputs(
     analysis_df: pd.DataFrame,
+    english_column: str,            # <-- NEW
     literal_column: str,
     cultural_context_column: str,
     tokenizer: AutoTokenizer,
@@ -1008,26 +1009,42 @@ def align_generation_outputs(
     input_device: torch.device,
     max_new_tokens: int,
     batch_size: int,
-    is_chat: bool = True,           # <-- NEW
+    is_chat: bool = True,           
     ban_think_tokens: bool = False,
 ) -> pd.DataFrame:
+    english_prompts = analysis_df[english_column].astype(str).tolist() # <-- NEW
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
     cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
 
+    # Generate tokens for all three
+    english_records = generate_first_tokens_for_prompts(
+        english_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens
+    )
     literal_records = generate_first_tokens_for_prompts(
-        literal_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens # <-- PASSED DOWN
+        literal_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens 
     )
     cultural_context_records = generate_first_tokens_for_prompts(
-        cultural_context_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens # <-- PASSED DOWN
+        cultural_context_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens 
     )
 
-    generation_df = analysis_df[["row_index", literal_column, cultural_context_column]].copy()
+    # Include the english column in the DataFrame copy
+    generation_df = analysis_df[["row_index", english_column, literal_column, cultural_context_column]].copy()
+    
+    # Append English generation results
+    generation_df["English_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in english_records]
+    generation_df["English_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in english_records]
+    generation_df["English_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in english_records]
+
+    # Append Input A (Literal) generation results
     generation_df["Input_A_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in literal_records]
     generation_df["Input_A_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in literal_records]
     generation_df["Input_A_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in literal_records]
+    
+    # Append Input B (Cultural Context) generation results
     generation_df["Input_B_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in cultural_context_records]
     generation_df["Input_B_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in cultural_context_records]
     generation_df["Input_B_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in cultural_context_records]
+    
     return generation_df
 
 
@@ -1339,9 +1356,10 @@ def run_pipeline(args: argparse.Namespace) -> None:
     pca_unsafe_lang_lit_3d = pca_3d.transform(pca_unsafe_lang_lit)
     pca_unsafe_lang_cult_3d = pca_3d.transform(pca_unsafe_lang_cult)
 
-    print("Generating first 20 tokens for Input_A_Literal and Input_B_Cultural_Context...")
+    print("Generating first 20 tokens for English, Input_A_Literal, and Input_B_Cultural_Context...")
     generation_df = align_generation_outputs(
         analysis_df=analysis_df,
+        english_column=english_column,  # <-- ADD THIS LINE
         literal_column=literal_column,
         cultural_context_column=cultural_context_column,
         tokenizer=tokenizer,
@@ -1349,10 +1367,10 @@ def run_pipeline(args: argparse.Namespace) -> None:
         input_device=input_device,
         max_new_tokens=args.max_new_tokens,
         batch_size=args.generation_batch_size,
-        is_chat=is_chat_model,          # <--- UPDATED
-        ban_think_tokens=ban_think,     # <--- UPDATED
+        is_chat=is_chat_model,          
+        ban_think_tokens=ban_think,     
     )
-
+    
     join_drop_columns = [literal_column, cultural_context_column]
     if english_column in results_df.columns:
         join_drop_columns.append(english_column)
