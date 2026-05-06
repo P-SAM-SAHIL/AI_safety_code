@@ -78,7 +78,7 @@ HARM_TYPE_COLUMN_CANDIDATES = [
 ]
 
 DEFAULT_HIDDEN_BATCH_SIZE = 4
-DEFAULT_GENERATION_BATCH_SIZE = 2
+DEFAULT_GENERATION_BATCH_SIZE = 32
 DEFAULT_SEQUENCE_CLL_BATCH_SIZE = 8
 DEFAULT_MAX_NEW_TOKENS = 20
 DEFAULT_PROBE_EPOCHS = 200
@@ -304,7 +304,69 @@ def format_prompts(tokenizer: AutoTokenizer, prompts: Sequence[str], is_chat: bo
             formatted.append(f"Question: {prompt}\nAnswer: ")
     return formatted
 
+def repeat_past_key_values(past_key_values: object, batch_size: int) -> object:
+    if hasattr(past_key_values, "to_legacy_cache"):
+        past_key_values = past_key_values.to_legacy_cache()
 
+    def repeat_item(item: object) -> object:
+        if torch.is_tensor(item):
+            return item.repeat_interleave(batch_size, dim=0)
+        if isinstance(item, tuple):
+            return tuple(repeat_item(x) for x in item)
+        if isinstance(item, list):
+            return [repeat_item(x) for x in item]
+        return item
+
+    return repeat_item(past_key_values)
+
+
+def build_padded_token_batch(
+    sequences: Sequence[Sequence[int]],
+    pad_token_id: int,
+    input_device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    max_len = max(len(seq) for seq in sequences)
+    input_ids = torch.full(
+        (len(sequences), max_len),
+        pad_token_id,
+        dtype=torch.long,
+        device=input_device,
+    )
+    attention_mask = torch.zeros_like(input_ids)
+
+    for row_idx, seq in enumerate(sequences):
+        if not seq:
+            continue
+        values = torch.tensor(seq, dtype=torch.long, device=input_device)
+        input_ids[row_idx, : len(seq)] = values
+        attention_mask[row_idx, : len(seq)] = 1
+
+    return input_ids, attention_mask
+
+
+def get_layer_numpy_from_cache_or_model(
+    hidden_cache: Dict[int, torch.Tensor],
+    prompts: Sequence[str],
+    layer: int,
+    tokenizer: AutoTokenizer,
+    model: AutoModelForCausalLM,
+    input_device: torch.device,
+    batch_size: int,
+    is_chat: bool,
+) -> np.ndarray:
+    if layer in hidden_cache:
+        return hidden_cache[layer].numpy()
+
+    return get_last_token_hidden_states(
+        prompts,
+        [layer],
+        tokenizer,
+        model,
+        input_device,
+        batch_size=batch_size,
+        is_chat=is_chat,
+    )[layer].numpy()
+    
 def get_last_token_hidden_states(
     prompts: Sequence[str],
     layers: Sequence[int],
@@ -508,53 +570,99 @@ def get_sequence_level_refusal_metrics(
     model: AutoModelForCausalLM,
     input_device: torch.device,
     batch_size: int,
-    is_chat: bool = True,  # <-- NEW
+    is_chat: bool = True,
 ) -> Dict[str, object]:
     ensure_pad_token(tokenizer)
     tokenizer.padding_side = "right"
+
+    if not candidate_sequences:
+        raise ValueError("No refusal candidate sequences were provided.")
 
     prompt_text = format_prompts(tokenizer, [prompt], is_chat=is_chat)[0]
     prompt_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
     if not prompt_ids:
         raise ValueError("Prompt produced no tokens.")
 
+    prompt_input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=input_device)
+    prompt_attention_mask = torch.ones_like(prompt_input_ids, dtype=torch.long)
+
+    with torch.no_grad():
+        prompt_outputs = model(
+            input_ids=prompt_input_ids,
+            attention_mask=prompt_attention_mask,
+            use_cache=True,
+            return_dict=True,
+        )
+        first_token_log_probs = F.log_softmax(prompt_outputs.logits[:, -1, :], dim=-1)[0].detach()
+
+    base_past_key_values = prompt_outputs.past_key_values
+    past_attention_mask = torch.ones(
+        (1, len(prompt_ids)),
+        dtype=torch.long,
+        device=input_device,
+    )
+
     all_candidate_scores = []
 
     for start in range(0, len(candidate_sequences), batch_size):
         batch = candidate_sequences[start : start + batch_size]
-        full_sequences = [prompt_ids + continuation_ids for _, continuation_ids in batch]
+        batch_continuations = [continuation_ids for _, continuation_ids in batch]
 
-        model_inputs = tokenizer.pad(
-            {
-                "input_ids": full_sequences,
-                "attention_mask": [[1] * len(ids) for ids in full_sequences],
-            },
-            return_tensors="pt",
-            padding=True,
-        ).to(input_device)
+        total_logprobs = [
+            float(first_token_log_probs[continuation_ids[0]].item())
+            for continuation_ids in batch_continuations
+        ]
 
-        with torch.no_grad():
-            outputs = model(**model_inputs, return_dict=True)
-            log_probs = F.log_softmax(outputs.logits, dim=-1)
+        prefixes = [continuation_ids[:-1] for continuation_ids in batch_continuations]
+        max_prefix_len = max(len(prefix) for prefix in prefixes)
 
-        for batch_index, (text, continuation_ids) in enumerate(batch):
-            total_logprob = 0.0
-            for token_offset, token_id in enumerate(continuation_ids):
-                position = len(prompt_ids) - 1 + token_offset
-                total_logprob += float(log_probs[batch_index, position, token_id].item())
+        if max_prefix_len > 0:
+            prefix_input_ids, prefix_attention_mask = build_padded_token_batch(
+                prefixes,
+                tokenizer.pad_token_id,
+                input_device,
+            )
+            expanded_past = repeat_past_key_values(base_past_key_values, len(batch))
+            attention_mask = torch.cat(
+                [past_attention_mask.expand(len(batch), -1), prefix_attention_mask],
+                dim=1,
+            )
 
-            avg_logprob = total_logprob / len(continuation_ids)
+            with torch.no_grad():
+                outputs = model(
+                    input_ids=prefix_input_ids,
+                    attention_mask=attention_mask,
+                    past_key_values=expanded_past,
+                    use_cache=False,
+                    return_dict=True,
+                )
+                log_probs = F.log_softmax(outputs.logits, dim=-1)
+
+            for batch_index, continuation_ids in enumerate(batch_continuations):
+                for token_offset in range(1, len(continuation_ids)):
+                    total_logprobs[batch_index] += float(
+                        log_probs[
+                            batch_index,
+                            token_offset - 1,
+                            continuation_ids[token_offset],
+                        ].item()
+                    )
+
+            del outputs, log_probs, expanded_past, prefix_input_ids, prefix_attention_mask, attention_mask
+            clear_memory()
+
+        for (text, continuation_ids), total_logprob in zip(batch, total_logprobs):
             all_candidate_scores.append(
                 {
                     "text": text,
                     "total_logprob": total_logprob,
-                    "avg_logprob": avg_logprob,
+                    "avg_logprob": total_logprob / len(continuation_ids),
                     "token_length": float(len(continuation_ids)),
                 }
             )
 
-        del outputs, log_probs, model_inputs
-        clear_memory()
+    del prompt_outputs, base_past_key_values
+    clear_memory()
 
     best_by_avg = max(all_candidate_scores, key=lambda item: item["avg_logprob"])
     best_by_total = max(all_candidate_scores, key=lambda item: item["total_logprob"])
@@ -574,6 +682,7 @@ def get_sequence_level_refusal_metrics(
     }
 
 
+
 def generate_first_tokens_for_prompts(
     prompts: Sequence[str],
     tokenizer: AutoTokenizer,
@@ -581,8 +690,8 @@ def generate_first_tokens_for_prompts(
     input_device: torch.device,
     max_new_tokens: int,
     batch_size: int,
-    is_chat: bool = True,           # <-- NEW
-    ban_think_tokens: bool = False, # <-- NEW
+    is_chat: bool = True,
+    ban_think_tokens: bool = False,
 ) -> List[Dict[str, str]]:
     if not prompts:
         return []
@@ -594,16 +703,17 @@ def generate_first_tokens_for_prompts(
     bad_words_ids = None
     if ban_think_tokens:
         bad_words_ids = []
-        for t in ["<think>", "</think>"]:
-            tid = tokenizer.convert_tokens_to_ids(t)
-            if tid is not None and tid != getattr(tokenizer, "unk_token_id", None):
-                bad_words_ids.append([tid])
+        for token_text in ["<think>", "</think>"]:
+            token_id = tokenizer.convert_tokens_to_ids(token_text)
+            if token_id is not None and token_id != getattr(tokenizer, "unk_token_id", None):
+                bad_words_ids.append([token_id])
         if not bad_words_ids:
             bad_words_ids = None
 
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start : start + batch_size]
         formatted_prompts = format_prompts(tokenizer, batch_prompts, is_chat=is_chat)
+
         inputs = tokenizer(
             formatted_prompts,
             return_tensors="pt",
@@ -618,20 +728,33 @@ def generate_first_tokens_for_prompts(
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
                 bad_words_ids=bad_words_ids,
+                use_cache=True,
             )
 
         prompt_width = inputs["input_ids"].shape[1]
-        generated_only = generated[:, prompt_width:]
+        generated_only = generated[:, prompt_width : prompt_width + max_new_tokens].detach().cpu()
+        generated_ids = generated_only.tolist()
 
+        decoded_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+
+        flat_token_ids = [token_id for row in generated_ids for token_id in row]
+        flat_token_texts = tokenizer.batch_decode(
+            [[token_id] for token_id in flat_token_ids],
+            skip_special_tokens=False,
+        )
+
+        width = generated_only.shape[1]
         for batch_index, prompt in enumerate(batch_prompts):
-            token_ids = generated_only[batch_index][:max_new_tokens].detach().cpu().tolist()
-            token_strings = [tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids]
+            offset = batch_index * width
+            token_ids = generated_ids[batch_index]
+            token_texts = flat_token_texts[offset : offset + width]
+
             records.append(
                 {
                     "prompt": prompt,
                     "token_ids": " ".join(map(str, token_ids)),
-                    "token_texts": " | ".join(token_strings),
-                    "decoded_text": tokenizer.decode(token_ids, skip_special_tokens=True),
+                    "token_texts": " | ".join(token_texts),
+                    "decoded_text": decoded_texts[batch_index],
                 }
             )
 
@@ -640,6 +763,7 @@ def generate_first_tokens_for_prompts(
 
     tokenizer.padding_side = "right"
     return records
+
 
 
 def infer_column(df: pd.DataFrame, override: Optional[str], candidates: Sequence[str], label: str) -> str:
@@ -999,53 +1123,43 @@ def print_probe_summary(probe_df: pd.DataFrame) -> None:
     print("-" * 72)
 
 
-def align_generation_outputs(
-    analysis_df: pd.DataFrame,
-    english_column: str,            # <-- NEW
-    literal_column: str,
-    cultural_context_column: str,
-    tokenizer: AutoTokenizer,
-    model: AutoModelForCausalLM,
-    input_device: torch.device,
-    max_new_tokens: int,
-    batch_size: int,
-    is_chat: bool = True,           
-    ban_think_tokens: bool = False,
-) -> pd.DataFrame:
-    english_prompts = analysis_df[english_column].astype(str).tolist() # <-- NEW
+    english_prompts = analysis_df[english_column].astype(str).tolist()
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
     cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
 
-    # Generate tokens for all three
-    english_records = generate_first_tokens_for_prompts(
-        english_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens
-    )
-    literal_records = generate_first_tokens_for_prompts(
-        literal_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens 
-    )
-    cultural_context_records = generate_first_tokens_for_prompts(
-        cultural_context_prompts, tokenizer, model, input_device, max_new_tokens, batch_size, is_chat, ban_think_tokens 
+    all_prompts = english_prompts + literal_prompts + cultural_context_prompts
+    all_records = generate_first_tokens_for_prompts(
+        all_prompts,
+        tokenizer,
+        model,
+        input_device,
+        max_new_tokens,
+        batch_size,
+        is_chat,
+        ban_think_tokens,
     )
 
-    # Include the english column in the DataFrame copy
+    n = len(analysis_df)
+    english_records = all_records[:n]
+    literal_records = all_records[n : 2 * n]
+    cultural_context_records = all_records[2 * n :]
+
     generation_df = analysis_df[["row_index", english_column, literal_column, cultural_context_column]].copy()
-    
-    # Append English generation results
-    generation_df["English_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in english_records]
-    generation_df["English_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in english_records]
-    generation_df["English_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in english_records]
 
-    # Append Input A (Literal) generation results
-    generation_df["Input_A_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in literal_records]
-    generation_df["Input_A_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in literal_records]
-    generation_df["Input_A_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in literal_records]
-    
-    # Append Input B (Cultural Context) generation results
-    generation_df["Input_B_Generated_First_20_Token_IDs"] = [record["token_ids"] for record in cultural_context_records]
-    generation_df["Input_B_Generated_First_20_Token_Texts"] = [record["token_texts"] for record in cultural_context_records]
-    generation_df["Input_B_Generated_First_20_Tokens_Decoded"] = [record["decoded_text"] for record in cultural_context_records]
-    
+    generation_df["English_Generated_First_20_Token_IDs"] = [r["token_ids"] for r in english_records]
+    generation_df["English_Generated_First_20_Token_Texts"] = [r["token_texts"] for r in english_records]
+    generation_df["English_Generated_First_20_Tokens_Decoded"] = [r["decoded_text"] for r in english_records]
+
+    generation_df["Input_A_Generated_First_20_Token_IDs"] = [r["token_ids"] for r in literal_records]
+    generation_df["Input_A_Generated_First_20_Token_Texts"] = [r["token_texts"] for r in literal_records]
+    generation_df["Input_A_Generated_First_20_Tokens_Decoded"] = [r["decoded_text"] for r in literal_records]
+
+    generation_df["Input_B_Generated_First_20_Token_IDs"] = [r["token_ids"] for r in cultural_context_records]
+    generation_df["Input_B_Generated_First_20_Token_Texts"] = [r["token_texts"] for r in cultural_context_records]
+    generation_df["Input_B_Generated_First_20_Tokens_Decoded"] = [r["decoded_text"] for r in cultural_context_records]
+
     return generation_df
+
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
@@ -1253,56 +1367,28 @@ def run_pipeline(args: argparse.Namespace) -> None:
         results_df[f"A_{key}"] = [item[key] for item in seq_metrics_a]
         results_df[f"B_{key}"] = [item[key] for item in seq_metrics_b]
 
-    print(f"Computing PCA and cross-language alignment at layer {pca_layer}...")
-    pca_safe_eng = get_last_token_hidden_states(
-        safe_prompts_eng,
-        [pca_layer],
-        tokenizer,
-        model,
-        input_device,
-        batch_size=args.hidden_batch_size,
-        is_chat=is_chat_model, # <--- UPDATED
-    )[pca_layer].numpy()
-    
-    pca_unsafe_eng = get_last_token_hidden_states(
-        unsafe_prompts_eng,
-        [pca_layer],
-        tokenizer,
-        model,
-        input_device,
-        batch_size=args.hidden_batch_size,
-        is_chat=is_chat_model, # <--- UPDATED
-    )[pca_layer].numpy()
-    
+       print(f"Computing PCA and cross-language alignment at layer {pca_layer}...")
+
+    pca_safe_eng = get_layer_numpy_from_cache_or_model(
+        safe_hiddens, safe_prompts_eng, pca_layer, tokenizer, model, input_device,
+        args.hidden_batch_size, is_chat_model,
+    )
+    pca_unsafe_eng = get_layer_numpy_from_cache_or_model(
+        unsafe_hiddens, unsafe_prompts_eng, pca_layer, tokenizer, model, input_device,
+        args.hidden_batch_size, is_chat_model,
+    )
     pca_safe_lang = get_last_token_hidden_states(
-        safe_prompts_lang,
-        [pca_layer],
-        tokenizer,
-        model,
-        input_device,
-        batch_size=args.hidden_batch_size,
-        is_chat=is_chat_model, # <--- UPDATED
+        safe_prompts_lang, [pca_layer], tokenizer, model, input_device,
+        batch_size=args.hidden_batch_size, is_chat=is_chat_model,
     )[pca_layer].numpy()
-    
-    pca_unsafe_lang_lit = get_last_token_hidden_states(
-        literal_prompts,
-        [pca_layer],
-        tokenizer,
-        model,
-        input_device,
-        batch_size=args.hidden_batch_size,
-        is_chat=is_chat_model, # <--- UPDATED
-    )[pca_layer].numpy()
-    
-    pca_unsafe_lang_cult = get_last_token_hidden_states(
-        cultural_context_prompts,
-        [pca_layer],
-        tokenizer,
-        model,
-        input_device,
-        batch_size=args.hidden_batch_size,
-        is_chat=is_chat_model, # <--- UPDATED
-    )[pca_layer].numpy()
+    pca_unsafe_lang_lit = get_layer_numpy_from_cache_or_model(
+        literal_hiddens, literal_prompts, pca_layer, tokenizer, model, input_device,
+        args.hidden_batch_size, is_chat_model,
+    )
+    pca_unsafe_lang_cult = get_layer_numpy_from_cache_or_model(
+        cultural_context_hiddens, cultural_context_prompts, pca_layer, tokenizer, model, input_device,
+        args.hidden_batch_size, is_chat_model,
+    )
 
     mu_safe_eng = np.mean(pca_safe_eng, axis=0)
     mu_unsafe_eng = np.mean(pca_unsafe_eng, axis=0)
