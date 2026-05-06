@@ -8,6 +8,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
+import copy
 
 import numpy as np
 import pandas as pd
