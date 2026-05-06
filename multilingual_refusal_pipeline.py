@@ -1367,7 +1367,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         results_df[f"A_{key}"] = [item[key] for item in seq_metrics_a]
         results_df[f"B_{key}"] = [item[key] for item in seq_metrics_b]
 
-       print(f"Computing PCA and cross-language alignment at layer {pca_layer}...")
+    print(f"Computing PCA and cross-language alignment at layer {pca_layer}...")
 
     pca_safe_eng = get_layer_numpy_from_cache_or_model(
         safe_hiddens, safe_prompts_eng, pca_layer, tokenizer, model, input_device,
