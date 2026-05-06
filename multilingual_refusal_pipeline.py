@@ -305,6 +305,16 @@ def format_prompts(tokenizer: AutoTokenizer, prompts: Sequence[str], is_chat: bo
     return formatted
 
 def repeat_past_key_values(past_key_values: object, batch_size: int) -> object:
+    # 1. Handle modern Hugging Face Cache classes (e.g., DynamicCache)
+    if hasattr(past_key_values, "key_cache") and hasattr(past_key_values, "value_cache"):
+        from transformers import DynamicCache
+        new_cache = DynamicCache()
+        for k, v in zip(past_key_values.key_cache, past_key_values.value_cache):
+            new_cache.key_cache.append(k.repeat_interleave(batch_size, dim=0))
+            new_cache.value_cache.append(v.repeat_interleave(batch_size, dim=0))
+        return new_cache
+
+    # 2. Fallback for older tuple-based cache formats
     if hasattr(past_key_values, "to_legacy_cache"):
         past_key_values = past_key_values.to_legacy_cache()
 
