@@ -1122,7 +1122,21 @@ def print_probe_summary(probe_df: pd.DataFrame) -> None:
         )
     print("-" * 72)
 
-
+# --- ADD THIS FUNCTION SIGNATURE ---
+def align_generation_outputs(
+    analysis_df: pd.DataFrame,
+    english_column: str,
+    literal_column: str,
+    cultural_context_column: str,
+    tokenizer: AutoTokenizer,
+    model: AutoModelForCausalLM,
+    input_device: torch.device,
+    max_new_tokens: int,
+    batch_size: int,
+    is_chat: bool,
+    ban_think_tokens: bool,
+) -> pd.DataFrame:
+# -----------------------------------
     english_prompts = analysis_df[english_column].astype(str).tolist()
     literal_prompts = analysis_df[literal_column].astype(str).tolist()
     cultural_context_prompts = analysis_df[cultural_context_column].astype(str).tolist()
