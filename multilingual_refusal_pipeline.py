@@ -167,7 +167,11 @@ def parse_args() -> argparse.Namespace:
             "for literal vs cultural context prompts across supported instruction-tuned models."
         )
     )
-    parser.add_argument("--language", required=True, help="Language code or name, e.g. amh, twi, hausa.")
+    parser.add_argument(
+        "--language", 
+        required=True, 
+        help="Language code or name, e.g. amh, twi, hausa, swa (Swahili)."
+    )
     parser.add_argument(
         "--model-id",
         required=True,
